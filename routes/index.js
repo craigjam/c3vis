@@ -177,10 +177,19 @@ function populateClusterStateWithInstanceSummaries(cluster) {
   })
   .then(function (describeContainerInstancesResponses) {
     if (!describeContainerInstancesResponses || describeContainerInstancesResponses.length === 0) {
-      return new Promise(function (resolve, reject) {
-        console.warn("No Container Instances found");
-        updateClusterState(cluster, FetchStatus.FETCHED, []);
-      });
+      if (tasksArray.length === 0){
+        return new Promise(function (resolve, reject) {
+          console.warn("No Container Instances found");
+          updateClusterState(cluster, FetchStatus.FETCHED, []);
+        });
+      } else {
+        //fargate only
+        return new Promise(function (resolve, reject) {
+          const instanceSummaries = [];
+          addFargate(tasksArray, instanceSummaries);
+          updateClusterState(cluster, FetchStatus.FETCHED, instanceSummaries);
+        });
+      }
     } else {
       const containerInstances = describeContainerInstancesResponses.reduce(function (acc, current) {
         return acc.concat(current.data.containerInstances);
@@ -189,6 +198,7 @@ function populateClusterStateWithInstanceSummaries(cluster) {
         return i.ec2InstanceId;
       });
       console.log(`Found ${ec2instanceIds.length} ec2InstanceIds for cluster '${cluster}': ${ec2instanceIds}`);
+
       return ec2.describeInstances({InstanceIds: ec2instanceIds}).promise()
       .then(function (ec2Instances) {
         const instances = [].concat.apply([], ec2Instances.data.Reservations.map(function (r) {
@@ -216,6 +226,8 @@ function populateClusterStateWithInstanceSummaries(cluster) {
             })
           }
         });
+        addFargate(tasksArray, instanceSummaries);
+        //console.log(instanceSummaries);
         updateClusterState(cluster, FetchStatus.FETCHED, instanceSummaries);
       });
     }
@@ -230,9 +242,61 @@ router.get('/api/cluster_names', function (req, res, next) {
   getClusterNames(useStaticData, res);
 });
 
+function addFargate(tasksArray, instanceSummaries){
+  //add fargate tasks as dummy instances here
+  tasksArray.forEach(function(i){
+    if (i.launchType === 'FARGATE'){
+      let cpuRem = i.taskDefinition.cpu;
+      let memRem = i.taskDefinition.memory;
+      i.taskDefinition.containerDefinitions.forEach(function(cd){
+        //copy reserved memory to memory
+        if ("memoryReservation" in cd){
+          if (!("memory" in cd)){
+            cd.memory = cd.memoryReservation;
+          }
+        }
+        //define missing properties
+        if (!("memory" in cd)){
+          cd.memory = 0;
+        }
+        if (!("cpu" in cd)){
+          cd.cpu = 0;
+        }
+        //keep running total
+        memRem -= cd.memory;
+        cpuRem -= cd.cpu;
+      });
+      i.taskDefinition.containerDefinitions.forEach(function(cd){
+        if (cd.cpu === 0){
+          //allocate remaining, won't appear on graph otherwise
+          cd.cpu = cpuRem / i.taskDefinition.containerDefinitions.length;
+        }
+        if (cd.memory === 0){
+          //allocate remaining, won't appear on graph otherwise
+          cd.memory = memRem / i.taskDefinition.containerDefinitions.length;
+        }
+      });
+      
+      let inst = {
+        "ec2IpAddress": i.launchType+i.taskArn.split('/').pop(),
+        "ec2InstanceId": "fargate",
+        "ec2InstanceConsoleUrl": null,
+        "ecsInstanceConsoleUrl": null,
+        "registeredCpu": i.taskDefinition.cpu,
+        "registeredMemory": i.taskDefinition.memory,
+        "remainingCpu": (cpuRem === 1*i.taskDefinition.cpu) ? 0 : cpuRem,
+        "remainingMemory": (memRem === 1*i.taskDefinition.memory) ? 0 : memRem,
+        "tasks": [ i ]
+      };
+      //console.log(inst);
+      instanceSummaries.push(inst);
+    }
+  });
+}
+
 function getClusterNames(useStaticData, res) {
   if (useStaticData) {
-    res.json(["demo-cluster-8", "demo-cluster-50", "demo-cluster-75", "demo-cluster-100", "invalid"]);
+    res.json(["demo-cluster-8", "demo-cluster-50", "demo-cluster-75", "demo-cluster-100", "nuodb-cluster","invalid"]);
   } else {
     ecs.listClusters({}, function (err, data1) {
       if (err) {

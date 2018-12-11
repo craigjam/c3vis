@@ -92,9 +92,9 @@ function addD3DataToTask(task, resourceType, y0) {
 
 function registeredResource(d, resourceType) {
   if (resourceType == ResourceEnum.MEMORY) {
-    return d.registeredMemory;
+    return +d.registeredMemory;
   } else if (resourceType == ResourceEnum.CPU) {
-    return d.registeredCpu;
+    return +d.registeredCpu;
   } else {
     throw "Unknown resource type: " + resourceType;
   }
@@ -253,13 +253,13 @@ function renderGraph(timestampDivId, chartDivId, legendDivId, cluster, resourceT
         return "Right-click for options";
       });
 
-    // Rotate X axis labels 90 degrees if bar is wide enough to cause overlapping
-    if (xRange.rangeBand() < 80) {
+    // Rotate X axis labels 45 degrees if bar is wide enough to cause overlapping
+    if (xRange.rangeBand() < 120) {
       xAxisLabels.selectAll("text")
         .attr("y", 0)
         .attr("x", 9)
         .attr("dy", ".35em")
-        .attr("transform", "rotate(90)")
+        .attr("transform", "rotate(45)")
         .style("text-anchor", "start");
     }
 
